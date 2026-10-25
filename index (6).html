@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Video–Audio Synchronizer</title>
+<style>
+:root{--n:#172554;--p:#FCE7F3;--b:#DBEAFE;--g:#F1F5F9;--t:#1E293B;--s:#64748B;--pk:#F9A8D4;--bl:#93C5FD;--ln:#CBD5E1}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--g);color:var(--t);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{background:var(--n);color:#fff;padding:8px 16px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}
+h1{margin:0;font-size:18px}header p{margin:0;color:#DBEAFE;font-size:12px}
+h2{margin:0 0 6px;font-size:13px}
+#app{flex:1;min-height:0;display:grid;grid-template-columns:minmax(270px,28%) 1fr;gap:12px;padding:12px}
+#ctl{overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px}
+#ws{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+.box{background:#fff;border:1px solid var(--ln);border-radius:10px;padding:10px}
+.pink{background:var(--p)}.blue{background:var(--b)}
+.drop{border:2px dashed var(--n);border-radius:8px;padding:6px;text-align:center;background:rgba(255,255,255,.65)}
+.drop.over{background:#fff}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.row+.row{margin-top:6px}
+.sp{justify-content:space-between}
+button{background:var(--n);color:#fff;border:1px solid var(--n);border-radius:7px;padding:6px 10px;font:inherit;cursor:pointer}
+button.alt{background:#fff;color:var(--n)}
+button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:3px solid #3B82F6;outline-offset:2px}
+input[type=number]{width:72px;border:1px solid var(--ln);border-radius:6px;padding:4px 6px;font:inherit;color:var(--t)}
+input[type=range]{accent-color:var(--n);flex:1;min-width:80px}
+label{display:flex;gap:6px;align-items:center}
+.info{margin-top:4px;word-break:break-all}.note{color:var(--s);font-size:12px}
+#vwrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center;overflow:hidden}
+video{height:100%;width:auto;max-width:100%;object-fit:contain;display:block;background:#000;border-radius:10px}
+#tl{position:relative;height:150px;flex:none;background:#fff;border:1px solid var(--ln);border-radius:10px;touch-action:none;overflow:hidden;user-select:none;cursor:pointer}
+#ruler{position:absolute;left:0;right:0;top:0;height:24px;background:var(--g);border-bottom:1px solid var(--ln);pointer-events:none}
+#ruler i{position:absolute;top:0;bottom:0;border-left:1px solid var(--s);padding:3px 0 0 3px;font-size:10px;font-style:normal;color:var(--s)}
+.lane{position:absolute;left:0;right:0;height:54px;background:var(--g)}
+.lane.l1{top:30px}.lane.l2{top:90px}
+.bar{position:absolute;top:6px;height:42px;border-radius:7px;border:1px solid var(--n);font-size:11px;padding:3px 10px;overflow:hidden;white-space:nowrap;color:var(--t);cursor:grab}
+#vb{background:var(--pk)}#ab{background:var(--bl)}#vb,#ab{padding:3px 16px}
+.ghost{background:transparent!important;border:1px dashed var(--s)!important;pointer-events:none;cursor:default}
+.hd{position:absolute;top:0;bottom:0;width:11px;background:var(--n);cursor:ew-resize;border-radius:5px}
+.hd::after{content:"";position:absolute;left:4px;top:30%;bottom:30%;width:2px;background:#fff}
+.hd.l{left:0}.hd.r{right:0}
+.pn{margin-left:auto;display:flex;gap:6px;align-items:center;font-size:12px}
+.pn input{border:1px solid var(--ln);border-radius:6px;padding:3px 6px;width:220px;font:inherit;color:var(--t)}
+#pvc{display:none;position:absolute;left:0;right:0;bottom:18px;justify-content:center;gap:10px;z-index:3}
+#vwrap.pv{background:#000}#vwrap.pv #pvc{display:flex}
+#vwrap.fs{position:fixed;inset:0;z-index:100;border-radius:0}
+#vwrap:fullscreen{background:#000}
+#head{position:absolute;top:0;bottom:0;width:2px;background:var(--n);pointer-events:none}
+#status{font-weight:600;min-height:18px}
+#fin{font-size:15px;padding:10px;width:100%}
+progress{width:100%;accent-color:var(--n)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;border:1px solid var(--n)}
+@media(max-width:900px){body{height:auto;overflow:auto}#app{display:block}#ctl{overflow:visible}#ws{margin-top:12px}#vwrap{height:46vh}}
+</style>
+</head>
+<body>
+<header><h1>Video–Audio Synchronizer</h1><p><em>Align your audio, preview your performance, and export your finished video.</em></p><label class="pn">Project Name <input type="text" id="pname" placeholder="finished_video" maxlength="80"></label></header>
+<div id="app">
+<aside id="ctl" aria-label="Controls">
+<section class="box pink"><h2>MP4 Video</h2>
+<div class="drop" id="dropv"><button id="pickv">Choose / Replace MP4</button> <span class="note">or drop here</span><input type="file" id="fv" accept=".mp4,video/mp4" hidden></div>
+<div class="info" id="infov">No video loaded.</div></section>
+<section class="box blue"><h2>MP3 Audio</h2>
+<div class="drop" id="dropa"><button id="picka">Choose / Replace MP3</button> <span class="note">or drop here</span><input type="file" id="fa" accept=".mp3,audio/mpeg" hidden></div>
+<div class="info" id="infoa">No audio loaded.</div></section>
+<section class="box"><h2>Volume</h2>
+<label><input type="checkbox" id="mute"> <strong>Mute Original Video Audio</strong></label>
+<label>Original video <input type="range" id="vvol" min="0" max="100" value="100" aria-label="Original video volume"></label>
+<label>MP3 <input type="range" id="avol" min="0" max="100" value="100" aria-label="MP3 volume"></label>
+<div class="note" id="src">Active audio: original video audio.</div></section>
+<section class="box"><h2>Playback</h2>
+<div class="row"><button id="play">Play</button><button id="pause" class="alt">Pause</button><button id="stop" class="alt">Stop</button><button id="restart" class="alt">Restart</button></div></section>
+<section class="box"><button id="fin">FINISH &amp; DOWNLOAD MP4</button>
+<progress id="prog" value="0" max="1" hidden></progress>
+<div class="info" id="exinfo"></div>
+<div class="note">First use downloads FFmpeg.wasm (~30 MB) from the internet. Video picture is copied unchanged; audio becomes AAC.</div></section>
+</aside>
+<main id="ws">
+<div id="vwrap"><video id="vid" playsinline></video><div id="pvc"><button id="pvplay">Play</button><button id="pvpause" class="alt">Pause</button><button id="pvexit" class="alt">Exit Preview</button></div></div>
+<div id="tl" tabindex="0" role="slider" aria-label="Timeline: click to seek, drag clips to align" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+<div id="ruler"></div>
+<div class="lane l1"><div class="bar ghost" id="vg"></div><div class="bar" id="vb"><span class="hd l" id="vhl" title="Trim video start"></span><span id="vbl"></span><span class="hd r" id="vhr" title="Trim video end"></span></div></div>
+<div class="lane l2"><div class="bar ghost" id="ag"></div><div class="bar" id="ab"><span class="hd l" id="ahl" title="Trim MP3 start"></span><span id="abl"></span><span class="hd r" id="ahr" title="Trim MP3 end"></span></div></div>
+<div id="head"></div>
+</div>
+<div class="row sp"><span class="note">Now <strong id="tnow">0:00.0</strong> / Video <strong id="tvd">--</strong> &nbsp;·&nbsp; Shift+drag a handle for fine trim</span><span class="row"><button id="rtrim" class="alt">Reset Trim</button><button id="pvbtn">Preview Full Screen</button></span></div>
+<div id="status" role="status" aria-live="polite">Load an MP4 and an MP3 to begin.</div>
+</main>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const vid=$('vid'),aud=new Audio();aud.preload='auto';
+const S={vb:null,ab:null};
+const urls={v:'',a:''};
+let raf=0,lastMsg='',exUrl='',ff=null,busy=false,vpos=0,ts=0,te=0,vs=0,ve=0,dg=null,rkey='',logTail=[];
+
+const num=(id,d=0)=>{const x=parseFloat($(id).value);return isFinite(x)?x:d};
+let OFF=0;const off=()=>OFF,rate=()=>1;
+const fmt=s=>{if(!isFinite(s))return'--';const n=s<0?'−':'';s=Math.abs(s);return n+Math.floor(s/60)+':'+(s%60).toFixed(1).padStart(4,'0')};
+const mb=n=>(n/1048576).toFixed(1)+' MB';
+const r3=x=>Math.round(x*1000)/1000;
+function st(m,bad){const e=$('status');e.textContent=m;e.style.color=bad?'#B91C1C':'var(--t)'}
+const ready=()=>!!(S.vb&&S.ab);
+
+/* ---------- file loading ---------- */
+async function setFile(k,file){
+  const isV=k==='v';
+  try{
+    if(!file||!file.size)throw new Error('That file is empty or unreadable.');
+    const ok=isV?(/\.mp4$/i.test(file.name)||file.type==='video/mp4'):(/\.mp3$/i.test(file.name)||file.type==='audio/mpeg');
+    if(!ok)throw new Error('Please choose '+(isV?'an MP4 video':'an MP3 audio')+' file.');
+    const url=URL.createObjectURL(file);
+    const probe=document.createElement(isV?'video':'audio');
+    try{await new Promise((res,rej)=>{probe.onloadedmetadata=res;probe.onerror=()=>rej(new Error());probe.src=url})}
+    catch{URL.revokeObjectURL(url);throw new Error('The browser could not read this file. It may be damaged or use an unsupported codec.')}
+    if(!isFinite(probe.duration)||probe.duration<=0){URL.revokeObjectURL(url);throw new Error('This file has no readable duration.')}
+    const d=probe.duration,vw=probe.videoWidth,vh=probe.videoHeight,dim=isV?vw+'×'+vh:'';
+    probe.removeAttribute('src');
+    stop();
+    if(urls[k])URL.revokeObjectURL(urls[k]);
+    urls[k]=url;S[k+'b']=file;(isV?vid:aud).src=url;
+    if(isV){vpos=0;vs=0;ve=d;vid.style.aspectRatio=vw+'/'+vh}else{ts=0;te=d;OFF=0}
+    $(isV?'infov':'infoa').textContent=file.name+' — '+fmt(d)+(dim?' — '+dim:'')+' — '+mb(file.size);
+    if(ready())$('mute').checked=true;
+    applyVol();ui();draw();
+    st(ready()?'Both files loaded. Original video audio is muted. Drag the clips to align, then Play.':'Now load the '+(isV?'MP3':'MP4')+' file.');
+  }catch(e){st(e.message,1)}
+}
+[['v','fv','pickv','dropv'],['a','fa','picka','dropa']].forEach(([k,f,b,d])=>{
+  $(b).onclick=()=>$(f).click();
+  $(f).onchange=e=>{const x=e.target.files[0];e.target.value='';if(x)setFile(k,x)};
+  const z=$(d);
+  z.ondragover=e=>{e.preventDefault();z.classList.add('over')};
+  z.ondragleave=()=>z.classList.remove('over');
+  z.ondrop=e=>{e.preventDefault();z.classList.remove('over');const x=e.dataTransfer.files[0];if(x)setFile(k,x)};
+});
+function ui(){['play','pause','stop','restart','pvbtn','rtrim'].forEach(i=>$(i).disabled=!ready());$('fin').disabled=!ready()||busy}
+function applyVol(){
+  vid.muted=$('mute').checked;vid.volume=$('vvol').value/100;aud.volume=$('avol').value/100;
+  $('src').textContent=!S.ab?'Active audio: original video audio.':vid.muted||vid.volume===0?'Active audio: uploaded MP3 only (original muted).':'Active audio: MP3 mixed with original video audio.';
+}
+['mute','vvol','avol'].forEach(i=>$(i).addEventListener('input',applyVol));
+
+/* ---------- synchronization: video is the master clock ---------- */
+/* MP3 source position for master time t is (t - offset) * rate. After the video ends, a wall-clock "tail"
+   keeps the master time running so the MP3 can finish; the video stays frozen on its last frame. */
+let tail=null,hold=null;
+const mt=()=>tail?tail.b+(performance.now()-tail.t0)/1000:hold!=null?hold:vid.currentTime;
+const active=()=>!!tail||(!vid.paused&&!vid.ended);
+function sync(){
+  if(!S.ab)return;
+  const t=mt(),o=off(),r=rate(),tg=(t-o)*r;
+  const playing=tail?true:(!vid.paused&&!vid.ended&&vid.readyState>2);
+  if(tail&&tg>=te){tail=null;hold=null}
+  const valid=tg>=ts&&tg<te;
+  let m;
+  if(!valid){
+    if(!aud.paused)aud.pause();
+    m=tg<ts?'MP3 silent: it starts in '+((ts-tg)/r).toFixed(1)+' s.':'MP3 has finished.';
+  }else if(!playing){
+    if(!aud.paused)aud.pause();
+    if(Math.abs(aud.currentTime-tg)>0.02)aud.currentTime=tg;
+    m=vid.paused?'Ready. MP3 position '+fmt(tg):'Buffering video…';
+  }else{
+    if(aud.paused){aud.currentTime=tg;aud.play().catch(()=>st('Browser blocked audio playback. Press Play again.',1))}
+    else if(Math.abs(aud.currentTime-tg)>0.12)aud.currentTime=tg;
+    m=tail?'Video finished; MP3 still playing. Position '+fmt(tg):'Playing in sync. MP3 position '+fmt(tg);
+  }
+  if(m!==lastMsg){lastMsg=m;if(ready())st(m)}
+}
+function endCheck(){
+  if(!tail&&hold==null&&!vid.paused&&ve>0){
+    if(vid.currentTime>=ve-0.03){vid.pause();vid.currentTime=ve;videoDone()}
+    else if(vid.currentTime<vs-0.05)vid.currentTime=vs;
+  }
+}
+function tick1(){endCheck();sync();draw()}
+function loop(){tick1();raf=active()?requestAnimationFrame(loop):0}
+function tick(){tick1();if(!raf&&active())raf=requestAnimationFrame(loop)}
+function videoDone(){
+  const tg=(ve-off())*rate();
+  if(S.ab&&!tail&&tg<te){tail={b:ve,t0:performance.now()};hold=null}
+}
+vid.addEventListener('ended',videoDone);
+['play','playing','pause','ended','seeked','waiting','loadedmetadata','durationchange'].forEach(e=>vid.addEventListener(e,tick));
+aud.addEventListener('loadedmetadata',draw);
+
+/* ---------- transport ---------- */
+function play(){
+  if(!ready()){st('Load both an MP4 and an MP3 first.',1);return}
+  if(tail)return;
+  if(hold!=null){tail={b:hold,t0:performance.now()};hold=null;tick();return}
+  if(vid.ended||vid.currentTime>=ve-0.05||vid.currentTime<vs-0.05)vid.currentTime=vs;
+  vid.play().then(()=>{const tg=(vid.currentTime-off())*rate();if(tg>=ts&&tg<te&&aud.paused){aud.currentTime=tg;aud.play().catch(()=>{})}}).catch(()=>st('Browser blocked playback. Press Play again.',1));
+}
+function pauseAll(){if(tail){hold=mt();tail=null}vid.pause();aud.pause();tick1()}
+function stop(){tail=null;hold=null;vid.pause();aud.pause();try{vid.currentTime=vs}catch{}tick1()}
+$('play').onclick=play;$('pause').onclick=pauseAll;$('stop').onclick=stop;
+$('restart').onclick=()=>{tail=null;hold=null;vid.currentTime=vs;play()};
+
+/* ---------- offset (set only by dragging the clips) ---------- */
+function clampO(o){
+  if(!S.ab||!isFinite(vid.duration))return o;
+  const lo=vs+0.1-te,hi=ve-0.1-ts;
+  return hi<lo?o:Math.min(hi,Math.max(lo,o));
+}
+function setOff(o){OFF=r3(clampO(o))}
+
+/* ---------- timeline drawing ---------- */
+function calcView(){
+  const vd=vid.duration||0,ad=aud.duration||0,o=off();
+  const a0=vpos+o,a1=a0+ad;
+  let mn=Math.min(vpos,S.ab?a0:vpos),mx=Math.max(vpos+vd,S.ab?a1:vpos+vd);
+  const pad=Math.max(1,(mx-mn)*0.03);
+  return{mn:mn-pad,sp:Math.max(mx-mn+2*pad,1)};
+}
+const fmt2=s=>{const n=s<0?'−':'';s=Math.abs(s);return n+Math.floor(s/60)+':'+(s%60).toFixed(2).padStart(5,'0')};
+function draw(){
+  const vd=vid.duration||0,ad=aud.duration||0,o=off(),V=dg?dg.view:calcView();
+  const P=x=>((x-V.mn)/V.sp*100)+'%',W=x=>(x/V.sp*100)+'%';
+  const vb=$('vb'),vg=$('vg');vb.style.display=vg.style.display=S.vb?'':'none';
+  vg.style.left=P(vpos);vg.style.width=W(vd);vb.style.left=P(vpos+vs);vb.style.width=W(ve-vs);
+  $('vbl').innerHTML='<span class="sw" style="background:var(--p)"></span> Video '+fmt2(vs)+' – '+fmt2(ve);
+  const ab=$('ab'),ag=$('ag');ab.style.display=ag.style.display=S.ab?'':'none';
+  ag.style.left=P(vpos+o);ag.style.width=W(ad);ab.style.left=P(vpos+o+ts);ab.style.width=W(te-ts);
+  $('abl').innerHTML='<span class="sw" style="background:var(--b)"></span> MP3 '+fmt2(ts)+' – '+fmt2(te);
+  $('head').style.left=P(vpos+Math.min(vd,mt()||0));
+  const k=V.mn.toFixed(3)+'|'+V.sp.toFixed(3)+'|'+vpos.toFixed(3);
+  if(k!==rkey){
+    rkey=k;const steps=[0.5,1,2,5,10,15,30,60,120,300];
+    const step=steps.find(s=>V.sp/s<=10)||600;let h='';
+    for(let i=Math.ceil((V.mn-vpos)/step);i<=Math.floor((V.mn+V.sp-vpos)/step);i++)h+='<i style="left:'+P(vpos+i*step)+'">'+fmt(i*step)+'</i>';
+    $('ruler').innerHTML=h;
+  }
+  $('tnow').textContent=fmt(mt());$('tvd').textContent=fmt(vd);
+  const tl=$('tl');tl.setAttribute('aria-valuemax',vd.toFixed(1));tl.setAttribute('aria-valuenow',(vid.currentTime||0).toFixed(1));
+}
+window.addEventListener('resize',()=>{rkey='';draw()});
+
+/* ---------- pointer interaction: seek, move clips (body), trim (dark handles) ---------- */
+const tl=$('tl'),cl=(x,a,b)=>Math.min(b,Math.max(a,x));
+function seekFrom(e,V){
+  if(!isFinite(vid.duration))return;
+  const rc=tl.getBoundingClientRect(),x=V.mn+cl((e.clientX-rc.left)/rc.width,0,1)*V.sp;
+  tail=null;hold=null;aud.pause();
+  vid.currentTime=cl(x-vpos,vs,ve);tick1();
+}
+tl.onpointerdown=e=>{
+  const id=e.target.id;let mode='seek';
+  if(S.vb&&id==='vhl')mode='vl';else if(S.vb&&id==='vhr')mode='vr';
+  else if(S.ab&&id==='ahl')mode='al';else if(S.ab&&id==='ahr')mode='ar';
+  else if(S.ab&&e.target.closest('#ab'))mode='ma';
+  else if(S.vb&&e.target.closest('#vb'))mode='mv';
+  dg={mode,x:e.clientX,lx:e.clientX,o:off(),vpos,view:calcView()};
+  tl.setPointerCapture(e.pointerId);
+  if(mode==='seek')seekFrom(e,dg.view);
+};
+tl.onpointermove=e=>{
+  if(!dg)return;
+  if(dg.mode==='seek')return seekFrom(e,dg.view);
+  const dx=e.clientX-dg.lx;dg.lx=e.clientX;
+  const dt=(e.clientX-dg.x)/tl.clientWidth*dg.view.sp,d=dx/tl.clientWidth*dg.view.sp*(e.shiftKey?0.1:1);
+  if(dg.mode==='ma')setOff(dg.o+dt);
+  else if(dg.mode==='mv'){const n=clampO(dg.o-dt);vpos=dg.vpos+(dg.o-n);OFF=r3(n)}
+  else{
+    if(dg.mode==='vl')vs=r3(cl(vs+d,0,ve-0.1));
+    else if(dg.mode==='vr')ve=r3(cl(ve+d,vs+0.1,vid.duration));
+    else if(dg.mode==='al')ts=r3(cl(ts+d,0,te-0.1));
+    else te=r3(cl(te+d,ts+0.1,aud.duration));
+    setOff(off());if(!active())vid.currentTime=cl(vid.currentTime,vs,ve);
+  }
+  tick();
+};
+tl.onpointerup=tl.onpointercancel=()=>{dg=null;rkey='';draw()};
+tl.onkeydown=e=>{
+  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();tail=null;hold=null;aud.pause();vid.currentTime=cl(vid.currentTime+(e.key==='ArrowRight'?1:-1),vs,ve);tick1()}
+};
+$('rtrim').onclick=()=>{vs=0;ve=vid.duration||0;ts=0;te=aud.duration||0;setOff(off());if(!active())vid.currentTime=cl(vid.currentTime,vs,ve);tick();st('Trim reset to the full video and MP3.')};
+
+/* ---------- full-screen preview: the same video element, clock and MP3 are used ---------- */
+const wrap=$('vwrap');let pv=false;
+async function enterPreview(){
+  if(!ready()||pv)return;
+  pv=true;wrap.classList.add('pv');stop();play();
+  try{await wrap.requestFullscreen()}catch{wrap.classList.add('fs')}
+}
+function exitPreview(){
+  if(!pv)return;pv=false;wrap.classList.remove('pv','fs');
+  if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
+  stop();
+}
+$('pvbtn').onclick=enterPreview;$('pvexit').onclick=exitPreview;$('pvplay').onclick=play;$('pvpause').onclick=pauseAll;
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)exitPreview()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')exitPreview()});
+
+/* ---------- FINISH & DOWNLOAD MP4 ----------
+   The FFmpeg core (ffmpeg.wasm 0.12.6, ESM build) is fetched from the jsDelivr CDN and run in our own small worker
+   (falls back to the page thread if workers are blocked). The earlier code relied on ffmpeg.wasm's own worker
+   wrapper, which loads its worker from a different origin and hangs silently when that fails; this version
+   avoids that and reports each failure. The ffmpeg commands below were tested with the same core in Node. */
+const CORE='https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm/';
+const WSRC=`let M;onmessage=async({data:d})=>{try{
+if(d.t==='load'){M=await(await import(d.core)).default({wasmBinary:d.wasm});M.setLogger(({message})=>postMessage({t:'log',m:message}));M.setProgress(({progress})=>postMessage({t:'prog',p:progress}));postMessage({t:'ready'})}
+else{M.FS.writeFile('in.mp4',d.v);M.FS.writeFile('in.mp3',d.a);M.setTimeout(-1);M.exec(...d.args);const rc=M.ret;M.reset();let out=null;if(rc===0)out=M.FS.readFile('out.mp4');
+for(const f of['in.mp4','in.mp3','out.mp4']){try{M.FS.unlink(f)}catch(e){}}
+postMessage({t:'done',rc,out},out?[out.buffer]:[])}
+}catch(e){postMessage({t:'err',m:String(e&&e.message||e)})}}`;
+function workerEngine(core,wasm){return new Promise((res,rej)=>{
+  const w=new Worker(URL.createObjectURL(new Blob([WSRC],{type:'text/javascript'})),{type:'module'});
+  const to=setTimeout(()=>{w.terminate();rej(new Error('timeout'))},60000);
+  w.onerror=()=>{clearTimeout(to);w.terminate();rej(new Error('worker'))};
+  w.onmessage=({data:d})=>{
+    if(d.t==='ready'){clearTimeout(to);res({run:(v,a,args,onP,onL)=>new Promise((rs,rj)=>{
+      w.onmessage=({data:m})=>{if(m.t==='log')onL(m.m);else if(m.t==='prog')onP(m.p);else if(m.t==='done')rs(m);else if(m.t==='err')rj(new Error(m.m))};
+      w.onerror=()=>rj(new Error('The export worker crashed (likely out of memory).'));
+      w.postMessage({t:'run',v,a,args},[v.buffer,a.buffer]);
+    })})}else if(d.t==='err'){clearTimeout(to);w.terminate();rej(new Error(d.m))}
+  };
+  w.postMessage({t:'load',core,wasm},[wasm]);
+})}
+async function mainEngine(core,wasm){
+  const M=await(await import(core)).default({wasmBinary:wasm});let L=()=>{},P=()=>{};
+  M.setLogger(({message})=>L(message));M.setProgress(({progress})=>P(progress));
+  return{run:async(v,a,args,onP,onL)=>{
+    L=onL;P=onP;await new Promise(r=>setTimeout(r,60));
+    M.FS.writeFile('in.mp4',v);M.FS.writeFile('in.mp3',a);M.setTimeout(-1);M.exec(...args);const rc=M.ret;M.reset();
+    const out=rc===0?M.FS.readFile('out.mp4'):null;
+    for(const f of['in.mp4','in.mp3','out.mp4']){try{M.FS.unlink(f)}catch{}}
+    return{rc,out};
+  }};
+}
+let eng=null;
+async function getEngine(){
+  if(eng)return eng;
+  let core,wasm;
+  try{
+    const a=await fetch(CORE+'ffmpeg-core.js'),b=await fetch(CORE+'ffmpeg-core.wasm');
+    if(!a.ok||!b.ok)throw new Error();
+    core=URL.createObjectURL(new Blob([await a.text()],{type:'text/javascript'}));wasm=await b.arrayBuffer();
+  }catch{throw new Error('LIB')}
+  try{eng=await workerEngine(core,wasm.slice(0))}catch{eng=await mainEngine(core,wasm)}
+  return eng;
+}
+/* Builds the ffmpeg command. All times are in source seconds; the output starts at the video trim start.
+   Audio clip window in output time = [o+ts-vs, o+te-vs]. Video is copied unless it is trimmed or must be extended. */
+function buildArgs(p){
+  const {o,vs,ve,vd,ts,te,ad,av,keep,vv}=p;
+  const Lv=ve-vs,c=o+ts-vs,aEnd=o+te-vs,T=Math.max(Lv,aEnd);
+  const vtrim=vs>0.01||ve<vd-0.01,ext=aEnd>Lv+0.05,re=vtrim||ext;
+  let a='[1:a]atrim=start='+ts.toFixed(3)+(te<ad-0.001?':end='+te.toFixed(3):'')+',asetpts=PTS-STARTPTS,';
+  a+=c>=0?'adelay='+Math.round(c*1000)+':all=1,':'atrim=start='+(-c).toFixed(3)+',asetpts=PTS-STARTPTS,';
+  a+='volume='+av+',apad';
+  let fc=keep?a+'[a1];[0:a]atrim=start='+vs.toFixed(3)+':end='+ve.toFixed(3)+',asetpts=PTS-STARTPTS,volume='+vv+'[a0];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]':a+'[a]';
+  if(re){
+    let v='[0:v]'+(vtrim?'trim=start='+vs.toFixed(3)+':end='+ve.toFixed(3)+',setpts=PTS-STARTPTS':'null');
+    if(ext)v+=',tpad=stop_mode=clone:stop_duration='+(T-Lv).toFixed(3);
+    fc=v+'[v];'+fc;
+  }
+  const args=['-i','in.mp4','-i','in.mp3','-filter_complex',fc,'-map',re?'[v]':'0:v:0','-map','[a]',
+    ...(re?['-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p']:['-c:v','copy']),
+    '-c:a','aac','-b:a','192k','-t',T.toFixed(3),'-movflags','+faststart','out.mp4'];
+  return{args,T};
+}
+function fname(){
+  const n=$('pname').value.trim().replace(/\.mp4$/i,'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'').replace(/\s+/g,'_').replace(/^[._]+|[._]+$/g,'');
+  return(n||'finished_video').slice(0,80)+'.mp4';
+}
+async function finish(){
+  if(busy)return;
+  if(!ready()){st('Load both an MP4 and an MP3 first.',1);return}
+  busy=true;ui();stop();$('prog').hidden=false;$('prog').value=0;
+  const ex=$('exinfo');ex.style.color='';ex.textContent='Loading export library (internet needed the first time)…';
+  logTail=[];
+  try{
+    const E=await getEngine();
+    ex.textContent='Processing… keep this tab open.';
+    /* Timeline in video time: audio starts at offset o and lasts the whole MP3. Output = max(video, audio end).
+       If audio runs past the video, the last video frame is frozen (video is re-encoded); otherwise video is copied. */
+    const {args,T}=buildArgs({o:off(),vs,ve,vd:vid.duration,ts,te,ad:aud.duration,av:aud.volume,keep:!$('mute').checked&&vid.volume>0,vv:vid.volume});
+    const v=new Uint8Array(await S.vb.arrayBuffer()),a2=new Uint8Array(await S.ab.arrayBuffer());
+    const res=await E.run(v,a2,args,p=>{if(p>=0&&p<=1)$('prog').value=p},m=>{logTail.push(m);if(logTail.length>4)logTail.shift()});
+    if(res.rc!==0||!res.out||res.out.length<1000)throw new Error('FFMPEG');
+    const blob=new Blob([res.out],{type:'video/mp4'});
+    if(exUrl)URL.revokeObjectURL(exUrl);
+    exUrl=URL.createObjectURL(blob);
+    const fn=fname(),link=document.createElement('a');link.href=exUrl;link.download=fn;link.textContent='Download again';
+    document.body.append(link);link.click();link.remove();
+    $('prog').value=1;
+    ex.textContent='Finished: '+fn+' ('+mb(blob.size)+', '+fmt(T)+') was generated and downloaded. ';ex.append(link);
+  }catch(e){
+    const msg=e&&e.message==='LIB'?'The export library could not be downloaded. Check your internet connection and try again.'
+      :e&&e.message==='FFMPEG'?'Export failed while processing. If the original audio is not muted, the MP4 needs an audio track. Details: '+logTail.join(' ').slice(-200)
+      :'Export failed: '+((e&&e.message)||'unknown error')+'. Large files can exceed browser memory.';
+    ex.textContent=msg;ex.style.color='#B91C1C';$('prog').hidden=true;
+  }finally{busy=false;ui()}
+}
+$('fin').onclick=finish;
+
+ui();draw();
+</script>
+</body>
+</html>
