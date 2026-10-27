@@ -123,7 +123,7 @@ async function setFile(k,file){
     probe.removeAttribute('src');
     stop();
     if(urls[k])URL.revokeObjectURL(urls[k]);
-    urls[k]=url;S[k+'b']=file;(isV?vid:aud).src=url;
+    hold=null;tail=null;urls[k]=url;S[k+'b']=file;(isV?vid:aud).src=url;
     if(isV){vpos=0;vs=0;ve=d;vid.style.aspectRatio=vw+'/'+vh}else{ts=0;te=d;OFF=0}
     $(isV?'infov':'infoa').textContent=file.name+' — '+fmt(d)+(dim?' — '+dim:'')+' — '+mb(file.size);
     if(ready())$('mute').checked=true;
@@ -156,7 +156,7 @@ function sync(){
   if(!S.ab)return;
   const t=mt(),o=off(),r=rate(),tg=(t-o)*r;
   const playing=tail?true:(!vid.paused&&!vid.ended&&vid.readyState>2);
-  if(tail&&tg>=te){tail=null;hold=null}
+  if(tail&&!tail.pre&&tg>=te){tail=null;hold=null}
   const valid=tg>=ts&&tg<te;
   let m;
   if(!valid){
@@ -174,6 +174,12 @@ function sync(){
   if(m!==lastMsg){lastMsg=m;if(ready())st(m)}
 }
 function endCheck(){
+  /* pre-roll finished: hand the clock over to the video, which starts at its trim start */
+  if(tail&&tail.pre&&!tail.j&&mt()>=vs){
+    tail.j=true;vid.currentTime=vs;
+    vid.play().then(()=>{tail=null;tick()}).catch(()=>{if(tail&&tail.j)tail=null});
+    return;
+  }
   if(!tail&&hold==null&&!vid.paused&&ve>0){
     if(vid.currentTime>=ve-0.03){vid.pause();vid.currentTime=ve;videoDone()}
     else if(vid.currentTime<vs-0.05)vid.currentTime=vs;
@@ -190,18 +196,28 @@ vid.addEventListener('ended',videoDone);
 ['play','playing','pause','ended','seeked','waiting','loadedmetadata','durationchange'].forEach(e=>vid.addEventListener(e,tick));
 aud.addEventListener('loadedmetadata',draw);
 
-/* ---------- transport ---------- */
-function play(){
-  if(!ready()){st('Load both an MP4 and an MP3 first.',1);return}
-  if(tail)return;
-  if(hold!=null){tail={b:hold,t0:performance.now()};hold=null;tick();return}
-  if(vid.ended||vid.currentTime>=ve-0.05||vid.currentTime<vs-0.05)vid.currentTime=vs;
+/* ---------- transport ----------
+   Master time is on the video's timeline but may run before the video's start (audio pre-roll) and after its
+   end (audio tail). Outside the video's range a wall-clock "tail" drives time while the video holds its first/last frame. */
+const startT=()=>Math.min(vs,off()+ts),endT=()=>Math.max(ve,off()+te);
+function begin(t){
+  tail=null;hold=null;
+  if(t<vs-0.01){vid.pause();vid.currentTime=vs;tail={b:t,t0:performance.now(),pre:true};tick();return}
+  if(t>=ve-0.03){vid.pause();vid.currentTime=ve;tail={b:t,t0:performance.now()};tick();return}
+  if(Math.abs(vid.currentTime-t)>0.05)vid.currentTime=t;
   vid.play().then(()=>{const tg=(vid.currentTime-off())*rate();if(tg>=ts&&tg<te&&aud.paused){aud.currentTime=tg;aud.play().catch(()=>{})}}).catch(()=>st('Browser blocked playback. Press Play again.',1));
 }
+function play(){
+  if(!ready()){st('Load both an MP4 and an MP3 first.',1);return}
+  if(active())return;
+  let t=mt();
+  if(vid.ended||t>=endT()-0.05||t<startT()-0.05)t=startT();
+  begin(t);
+}
 function pauseAll(){if(tail){hold=mt();tail=null}vid.pause();aud.pause();tick1()}
-function stop(){tail=null;hold=null;vid.pause();aud.pause();try{vid.currentTime=vs}catch{}tick1()}
+function stop(){tail=null;const s=startT();hold=(S.ab&&s<vs-0.01)?s:null;vid.pause();aud.pause();try{vid.currentTime=vs}catch{}tick1()}
 $('play').onclick=play;$('pause').onclick=pauseAll;$('stop').onclick=stop;
-$('restart').onclick=()=>{tail=null;hold=null;vid.currentTime=vs;play()};
+$('restart').onclick=()=>{if(!ready())return;stop();play()};
 
 /* ---------- offset (set only by dragging the clips) ---------- */
 function clampO(o){
@@ -229,7 +245,7 @@ function draw(){
   const ab=$('ab'),ag=$('ag');ab.style.display=ag.style.display=S.ab?'':'none';
   ag.style.left=P(vpos+o);ag.style.width=W(ad);ab.style.left=P(vpos+o+ts);ab.style.width=W(te-ts);
   $('abl').innerHTML='<span class="sw" style="background:var(--b)"></span> MP3 '+fmt2(ts)+' – '+fmt2(te);
-  $('head').style.left=P(vpos+Math.min(vd,mt()||0));
+  $('head').style.left=P(vpos+(mt()||0));
   const k=V.mn.toFixed(3)+'|'+V.sp.toFixed(3)+'|'+vpos.toFixed(3);
   if(k!==rkey){
     rkey=k;const steps=[0.5,1,2,5,10,15,30,60,120,300];
@@ -244,11 +260,15 @@ window.addEventListener('resize',()=>{rkey='';draw()});
 
 /* ---------- pointer interaction: seek, move clips (body), trim (dark handles) ---------- */
 const tl=$('tl'),cl=(x,a,b)=>Math.min(b,Math.max(a,x));
+function seekTo(t){
+  const was=active();aud.pause();t=cl(t,startT(),endT());
+  if(was)begin(t);
+  else{tail=null;hold=null;if(t<vs||t>ve){vid.pause();vid.currentTime=cl(t,vs,ve);hold=t}else vid.currentTime=t;tick1()}
+}
 function seekFrom(e,V){
   if(!isFinite(vid.duration))return;
-  const rc=tl.getBoundingClientRect(),x=V.mn+cl((e.clientX-rc.left)/rc.width,0,1)*V.sp;
-  tail=null;hold=null;aud.pause();
-  vid.currentTime=cl(x-vpos,vs,ve);tick1();
+  const rc=tl.getBoundingClientRect();
+  seekTo(V.mn+cl((e.clientX-rc.left)/rc.width,0,1)*V.sp-vpos);
 }
 tl.onpointerdown=e=>{
   const id=e.target.id;let mode='seek';
@@ -278,7 +298,7 @@ tl.onpointermove=e=>{
 };
 tl.onpointerup=tl.onpointercancel=()=>{dg=null;rkey='';draw()};
 tl.onkeydown=e=>{
-  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();tail=null;hold=null;aud.pause();vid.currentTime=cl(vid.currentTime+(e.key==='ArrowRight'?1:-1),vs,ve);tick1()}
+  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();seekTo(mt()+(e.key==='ArrowRight'?1:-1))}
 };
 $('rtrim').onclick=()=>{vs=0;ve=vid.duration||0;ts=0;te=aud.duration||0;setOff(off());if(!active())vid.currentTime=cl(vid.currentTime,vs,ve);tick();st('Trim reset to the full video and MP3.')};
 
@@ -350,15 +370,15 @@ async function getEngine(){
    Audio clip window in output time = [o+ts-vs, o+te-vs]. Video is copied unless it is trimmed or must be extended. */
 function buildArgs(p){
   const {o,vs,ve,vd,ts,te,ad,av,keep,vv}=p;
-  const Lv=ve-vs,c=o+ts-vs,aEnd=o+te-vs,T=Math.max(Lv,aEnd);
-  const vtrim=vs>0.01||ve<vd-0.01,ext=aEnd>Lv+0.05,re=vtrim||ext;
-  let a='[1:a]atrim=start='+ts.toFixed(3)+(te<ad-0.001?':end='+te.toFixed(3):'')+',asetpts=PTS-STARTPTS,';
-  a+=c>=0?'adelay='+Math.round(c*1000)+':all=1,':'atrim=start='+(-c).toFixed(3)+',asetpts=PTS-STARTPTS,';
-  a+='volume='+av+',apad';
-  let fc=keep?a+'[a1];[0:a]atrim=start='+vs.toFixed(3)+':end='+ve.toFixed(3)+',asetpts=PTS-STARTPTS,volume='+vv+'[a0];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]':a+'[a]';
+  /* All times are on the video's timeline. Output starts at the earliest of video start / audio start and ends at the
+     latest of video end / audio end, so no intended audio is cut. Video holds its first/last frame to fill gaps. */
+  const Ts=Math.min(vs,o+ts),End=Math.max(ve,o+te),T=End-Ts,pre=vs-Ts,post=End-ve,c=o+ts-Ts;
+  const vtrim=vs>0.01||ve<vd-0.01,hp=pre>0.01,hs=post>0.05,re=vtrim||hp||hs;
+  let a='[1:a]atrim=start='+ts.toFixed(3)+(te<ad-0.001?':end='+te.toFixed(3):'')+',asetpts=PTS-STARTPTS,adelay='+Math.round(c*1000)+':all=1,volume='+av+',apad';
+  let fc=keep?a+'[a1];[0:a]atrim=start='+vs.toFixed(3)+':end='+ve.toFixed(3)+',asetpts=PTS-STARTPTS,adelay='+Math.round(pre*1000)+':all=1,volume='+vv+'[a0];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0,volume=2[a]':a+'[a]';
   if(re){
     let v='[0:v]'+(vtrim?'trim=start='+vs.toFixed(3)+':end='+ve.toFixed(3)+',setpts=PTS-STARTPTS':'null');
-    if(ext)v+=',tpad=stop_mode=clone:stop_duration='+(T-Lv).toFixed(3);
+    if(hp||hs)v+=',tpad='+[hp?'start_mode=clone:start_duration='+pre.toFixed(3):'',hs?'stop_mode=clone:stop_duration='+post.toFixed(3):''].filter(Boolean).join(':');
     fc=v+'[v];'+fc;
   }
   const args=['-i','in.mp4','-i','in.mp3','-filter_complex',fc,'-map',re?'[v]':'0:v:0','-map','[a]',
